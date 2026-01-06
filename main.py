@@ -1,13 +1,14 @@
 import sqlite3
 import random
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     CallbackQueryHandler,
     ContextTypes,
     MessageHandler,
-    filters
+    filters,
+    JobQueue
 )
 
 # ================= НАСТРОЙКИ =================
@@ -83,8 +84,24 @@ async def quiz_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     quiz_id = int(query.data.split("|")[1])
+        # запрет повторного прохождения квиза
+    cursor.execute(
+        "SELECT 1 FROM users WHERE user_id=? AND quiz_id=?",
+        (query.from_user.id, quiz_id)
+    )
+    if cursor.fetchone():
+        await query.message.reply_text(
+            "❌ Вы уже проходили этот тест.\n"
+        )
+        return
     context.user_data["quiz_id"] = quiz_id
     context.user_data["index"] = 0
+
+    cursor.execute(
+        "INSERT OR IGNORE INTO users (user_id, quiz_id, score) VALUES (?, ?, 0)",
+        (query.from_user.id, quiz_id)
+    )
+    conn.commit()
 
     await send_question(query, context)
 
@@ -116,6 +133,7 @@ async def send_question(query, context):
 
     q_id, question, answer, options, image = row
     options = options.split(",")
+    images = image.split(",") if image else []
 
     random.shuffle(options)
 
@@ -124,10 +142,27 @@ async def send_question(query, context):
         for opt in options
     ]
 
-    if image:
-        await query.message.reply_photo(
-            photo=image,
-            caption=question,
+    if images:
+        media = []
+
+        # первое фото — с вопросом
+        media.append(
+            InputMediaPhoto(
+                media=images[0],
+                caption=question
+            )
+        )
+
+        # остальные фото
+        for img in images[1:]:
+            media.append(InputMediaPhoto(media=img))
+
+        # отправляем альбом
+        await query.message.reply_media_group(media)
+
+        # кнопки отправляем отдельным сообщением
+        await query.message.reply_text(
+            "Выберите ответ:",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
     else:
@@ -247,8 +282,37 @@ async def admin_add_question(update: Update, context: ContextTypes.DEFAULT_TYPE)
             "/add_question 1 Вопрос,Ответ,Вариант1,Вариант2"
         )
 
+async def save_media_group(context: ContextTypes.DEFAULT_TYPE):
+    job_data = context.job.data
+    group_id = job_data["group_id"]
+
+    groups = context.bot_data.get("media_groups", {})
+    if group_id not in groups:
+        return
+
+    data = groups.pop(group_id)
+
+    image = ",".join(data["images"])
+
+    cursor.execute(
+        "INSERT INTO questions (quiz_id, question, answer, options, image) VALUES (?, ?, ?, ?, ?)",
+        (data["quiz_id"], data["question"], data["correct"], data["options"], image)
+    )
+    conn.commit()
+
+    await context.bot.send_message(
+        chat_id=data["chat_id"],
+        text="✅ Вопрос с несколькими фото добавлен"
+    )
+
+
 async def admin_add_question_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS:
+        return
+
+    # если фото нет — это обычный текстовый вопрос
+    if not update.message.photo:
+        await admin_add_question(update, context)
         return
 
     caption = update.message.caption
@@ -276,8 +340,40 @@ async def admin_add_question_photo(update: Update, context: ContextTypes.DEFAULT
         correct = chunks[1]
         options = ",".join(chunks[1:])  # варианты включают правильный
 
+        # берём ТОЛЬКО самое большое фото (последний элемент)
         photo = update.message.photo[-1]
-        image = photo.file_id  # Telegram file_id
+        file_id = photo.file_id
+
+        # media group (альбом)
+        group_id = update.message.media_group_id
+
+        if group_id:
+            if "media_groups" not in context.bot_data:
+                context.bot_data["media_groups"] = {}
+
+            if group_id not in context.bot_data["media_groups"]:
+                context.bot_data["media_groups"][group_id] = {
+                    "quiz_id": quiz_id,
+                    "question": question,
+                    "correct": correct,
+                    "options": options,
+                    "images": [],
+                    "chat_id": update.effective_chat.id
+                }
+
+                # запускаем таймер сохранения (1 секунда)
+                context.job_queue.run_once(
+                    save_media_group,
+                    when=1.0,
+                    data={"group_id": group_id},
+                    name=str(group_id)
+                )
+
+            context.bot_data["media_groups"][group_id]["images"].append(file_id)
+            return
+        else:
+            # одиночное фото
+            image = file_id
 
         cursor.execute(
             "INSERT INTO questions (quiz_id, question, answer, options, image) VALUES (?, ?, ?, ?, ?)",
