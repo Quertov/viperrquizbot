@@ -12,8 +12,8 @@ from telegram.ext import (
 )
 
 # ================= НАСТРОЙКИ =================
-TOKEN = "8122346611:AAH6_yMhtdraiQI-xCHJw4h8AratUHxfpok"
-CHANNELS = []
+TOKEN = "8540104984:AAG5aOlc1JUuKuGea-5yath0svxPWYW6h6s"
+CHANNELS = ["@vipe2rk"]
 ADMIN_IDS = [947059513, 1474840147]
 QUESTION_TIME = 10      # секунд на вопрос
 TIMER_ENABLED = True   # включён ли таймер
