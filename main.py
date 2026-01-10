@@ -12,8 +12,8 @@ from telegram.ext import (
 )
 
 # ================= НАСТРОЙКИ =================
-TOKEN = "8540104984:AAG5aOlc1JUuKuGea-5yath0svxPWYW6h6s"
-CHANNELS = ["@vipe2rk"]
+TOKEN = "8122346611:AAH6_yMhtdraiQI-xCHJw4h8AratUHxfpok"
+CHANNELS = []
 ADMIN_IDS = [947059513, 1474840147]
 QUESTION_TIME = 10      # секунд на вопрос
 TIMER_ENABLED = True   # включён ли таймер
@@ -423,6 +423,49 @@ async def admin_timer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Неверная команда")
 
 
+# ================= УДАЛЕНИЕ КВИЗА С ПЕРЕНУМЕРАЦИЕЙ =================
+
+async def admin_remove_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS:
+        return
+
+    if not context.args:
+        await update.message.reply_text("❌ Используй:\n/remove_quiz ID")
+        return
+
+    try:
+        quiz_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("❌ ID должен быть числом")
+        return
+
+    cursor.execute("SELECT id FROM quizzes WHERE id=?", (quiz_id,))
+    if not cursor.fetchone():
+        await update.message.reply_text("❌ Квиз с таким ID не найден")
+        return
+
+    cursor.execute("DELETE FROM questions WHERE quiz_id=?", (quiz_id,))
+    cursor.execute("DELETE FROM users WHERE quiz_id=?", (quiz_id,))
+    cursor.execute("DELETE FROM quizzes WHERE id=?", (quiz_id,))
+
+    cursor.execute("SELECT id FROM quizzes ORDER BY id")
+    rows = cursor.fetchall()
+
+    new_id = 1
+    for (old_id,) in rows:
+        if old_id != new_id:
+            cursor.execute("UPDATE quizzes SET id=? WHERE id=?", (new_id, old_id))
+            cursor.execute("UPDATE questions SET quiz_id=? WHERE quiz_id=?", (new_id, old_id))
+            cursor.execute("UPDATE users SET quiz_id=? WHERE quiz_id=?", (new_id, old_id))
+        new_id += 1
+
+    # сбрасываем AUTOINCREMENT
+    cursor.execute("DELETE FROM sqlite_sequence WHERE name='quizzes'")
+    conn.commit()
+
+    await update.message.reply_text("🗑 Квиз удалён и перенумерован")
+
+
 # ================= КАНАЛЫ (Управление) =================
 
 async def admin_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -603,6 +646,7 @@ app.add_handler(CommandHandler("leaderboard", show_leaderboard))
 app.add_handler(CommandHandler("channels", admin_channels))
 app.add_handler(CommandHandler("add_channel", admin_add_channel))
 app.add_handler(CommandHandler("remove_channel", admin_remove_channel))
+app.add_handler(CommandHandler("remove_quiz", admin_remove_quiz))
 app.add_handler(
     MessageHandler(
         filters.PHOTO & filters.CaptionRegex(r"^/add_question"),
