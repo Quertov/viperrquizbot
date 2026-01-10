@@ -12,8 +12,8 @@ from telegram.ext import (
 )
 
 # ================= НАСТРОЙКИ =================
-TOKEN = "8122346611:AAH6_yMhtdraiQI-xCHJw4h8AratUHxfpok"
-CHANNELS = ["@viperrtest", "@viperrtest2"]
+TOKEN = "8540104984:AAG5aOlc1JUuKuGea-5yath0svxPWYW6h6s"
+CHANNELS = ["@vipe2rk"]
 ADMIN_IDS = [947059513, 1474840147]
 QUESTION_TIME = 10      # секунд на вопрос
 TIMER_ENABLED = True   # включён ли таймер
@@ -422,6 +422,63 @@ async def admin_timer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("❌ Неверная команда")
 
+
+# ================= КАНАЛЫ (Управление) =================
+
+async def admin_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS:
+        return
+
+    if not CHANNELS:
+        await update.message.reply_text("📭 Список каналов пуст.")
+        return
+
+    text = "📢 Каналы для обязательной подписки:\n\n"
+    for ch in CHANNELS:
+        text += f"• {ch}\n"
+
+    await update.message.reply_text(text)
+
+
+async def admin_add_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS:
+        return
+
+    if not context.args:
+        await update.message.reply_text("❌ Используй:\n/add_channel @channel")
+        return
+
+    channel = context.args[0]
+
+    if not channel.startswith("@"):
+        await update.message.reply_text("❌ Канал должен начинаться с @")
+        return
+
+    if channel in CHANNELS:
+        await update.message.reply_text("⚠️ Этот канал уже добавлен")
+        return
+
+    CHANNELS.append(channel)
+    await update.message.reply_text(f"✅ Канал {channel} добавлен")
+
+
+async def admin_remove_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS:
+        return
+
+    if not context.args:
+        await update.message.reply_text("❌ Используй:\n/remove_channel @channel")
+        return
+
+    channel = context.args[0]
+
+    if channel not in CHANNELS:
+        await update.message.reply_text("⚠️ Такого канала нет в списке")
+        return
+
+    CHANNELS.remove(channel)
+    await update.message.reply_text(f"🗑 Канал {channel} удалён")
+
 async def save_media_group(context: ContextTypes.DEFAULT_TYPE):
     job_data = context.job.data
     group_id = job_data["group_id"]
@@ -543,6 +600,9 @@ app.add_handler(CommandHandler("add_quiz", admin_add_quiz))
 app.add_handler(CommandHandler("add_question", admin_add_question))
 app.add_handler(CommandHandler("timer", admin_timer))
 app.add_handler(CommandHandler("leaderboard", show_leaderboard))
+app.add_handler(CommandHandler("channels", admin_channels))
+app.add_handler(CommandHandler("add_channel", admin_add_channel))
+app.add_handler(CommandHandler("remove_channel", admin_remove_channel))
 app.add_handler(
     MessageHandler(
         filters.PHOTO & filters.CaptionRegex(r"^/add_question"),
