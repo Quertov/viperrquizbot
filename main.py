@@ -388,6 +388,77 @@ async def admin_add_question(update: Update, context: ContextTypes.DEFAULT_TYPE)
             "/add_question 1 Вопрос,Ответ,Вариант1,Вариант2"
         )
 
+# ================= УДАЛЕНИЕ ВОПРОСА АДМИНОМ =================
+async def admin_remove_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS:
+        return
+
+    if len(context.args) != 2:
+        await update.message.reply_text(
+            "❌ Используй:\n/remove_question ID_квиза НОМЕР_вопроса"
+        )
+        return
+
+    try:
+        quiz_id = int(context.args[0])
+        number = int(context.args[1])
+    except ValueError:
+        await update.message.reply_text("❌ ID и номер должны быть числами")
+        return
+
+    cursor.execute(
+        "SELECT id FROM questions WHERE quiz_id=? ORDER BY id",
+        (quiz_id,)
+    )
+    rows = cursor.fetchall()
+
+    if not rows or number < 1 or number > len(rows):
+        await update.message.reply_text("❌ Вопрос с таким номером не найден")
+        return
+
+    question_id = rows[number - 1][0]
+
+    cursor.execute("DELETE FROM questions WHERE id=?", (question_id,))
+
+    # безопасная перенумеровка id внутри квиза
+    cursor.execute(
+        "SELECT id FROM questions WHERE quiz_id=? ORDER BY id",
+        (quiz_id,)
+    )
+    rows = cursor.fetchall()
+
+    # шаг 1: временно уводим id в отрицательные значения
+    temp_id = -1
+    for (old_id,) in rows:
+        cursor.execute(
+            "UPDATE questions SET id=? WHERE id=?",
+            (temp_id, old_id)
+        )
+        temp_id -= 1
+
+    # шаг 2: назначаем правильные id 1..N
+    cursor.execute(
+        "SELECT id FROM questions WHERE quiz_id=? ORDER BY id DESC",
+        (quiz_id,)
+    )
+    rows = cursor.fetchall()
+
+    new_id = 1
+    for (old_id,) in rows[::-1]:
+        cursor.execute(
+            "UPDATE questions SET id=? WHERE id=?",
+            (new_id, old_id)
+        )
+        new_id += 1
+
+    # сбрасываем AUTOINCREMENT
+    cursor.execute("DELETE FROM sqlite_sequence WHERE name='questions'")
+    conn.commit()
+
+    await update.message.reply_text(
+        f"🗑 Вопрос №{number} удалён и перенумерован в квизе {quiz_id}"
+    )
+
 async def admin_timer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS:
         return
@@ -647,6 +718,7 @@ app.add_handler(CommandHandler("channels", admin_channels))
 app.add_handler(CommandHandler("add_channel", admin_add_channel))
 app.add_handler(CommandHandler("remove_channel", admin_remove_channel))
 app.add_handler(CommandHandler("remove_quiz", admin_remove_quiz))
+app.add_handler(CommandHandler("remove_question", admin_remove_question))
 app.add_handler(
     MessageHandler(
         filters.PHOTO & filters.CaptionRegex(r"^/add_question"),
