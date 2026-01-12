@@ -149,7 +149,7 @@ async def send_question(query, context):
         return
 
     q_id, question, answer, options, image = row
-    options = options.split(",")
+    options = [o.strip() for o in options.split(",")]
     images = image.split(",") if image else []
 
     random.shuffle(options)
@@ -291,10 +291,9 @@ async def answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         (q_id,)
     )
     answer, options = cursor.fetchone()
-    options = options.split(",")
-
+    options = [o.strip() for o in options.split(",")]
     selected = options[selected_index]
-    correct = answer
+    correct = answer.strip()
 
     if selected == correct:
         text = "✅ Верно!"
