@@ -94,16 +94,17 @@ async def quiz_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     quiz_id = int(query.data.split("|")[1])
-        # запрет повторного прохождения квиза
-    cursor.execute(
-        "SELECT 1 FROM users WHERE user_id=? AND quiz_id=?",
-        (query.from_user.id, quiz_id)
-    )
-    if cursor.fetchone():
-        await query.message.reply_text(
-            "❌ Вы уже проходили этот тест\n"
+        # запрет повторного прохождения квиза (кроме админов)
+    if query.from_user.id not in ADMIN_IDS:
+        cursor.execute(
+            "SELECT 1 FROM users WHERE user_id=? AND quiz_id=?",
+            (query.from_user.id, quiz_id)
         )
-        return
+        if cursor.fetchone():
+            await query.message.reply_text(
+                "❌ Вы уже проходили этот тест"
+            )
+            return
     context.user_data["quiz_id"] = quiz_id
     context.user_data["index"] = 0
 
