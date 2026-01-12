@@ -153,6 +153,8 @@ async def send_question(query, context):
     images = image.split(",") if image else []
 
     random.shuffle(options)
+    # сохраняем порядок вариантов для проверки ответа
+    context.application.user_data[user_id]["options"] = options
 
     keyboard = []
     for i, opt in enumerate(options):
@@ -287,13 +289,16 @@ async def answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     selected_index = int(selected_index)
 
     cursor.execute(
-        "SELECT answer, options FROM questions WHERE id=?",
+        "SELECT answer FROM questions WHERE id=?",
         (q_id,)
     )
-    answer, options = cursor.fetchone()
-    options = [o.strip() for o in options.split(",")]
+    correct = cursor.fetchone()[0].strip()
+
+    options = user_data.get("options")
+    if not options:
+        return
+
     selected = options[selected_index]
-    correct = answer.strip()
 
     if selected == correct:
         text = "✅ Верно!"
