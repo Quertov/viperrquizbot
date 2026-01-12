@@ -705,7 +705,15 @@ async def admin_add_question_photo(update: Update, context: ContextTypes.DEFAULT
 
 # ================= ЗАПУСК =================
 
-app = ApplicationBuilder().token(TOKEN).build()
+# Включаем JobQueue для корректной работы таймеров
+job_queue = JobQueue()
+
+app = (
+    ApplicationBuilder()
+    .token(TOKEN)
+    .job_queue(job_queue)
+    .build()
+)
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CallbackQueryHandler(quiz_select, pattern=r"^quiz\|"))
