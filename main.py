@@ -154,10 +154,11 @@ async def send_question(query, context):
 
     random.shuffle(options)
 
-    keyboard = [
-        [InlineKeyboardButton(opt, callback_data=f"answer|{q_id}|{opt}")]
-        for opt in options
-    ]
+    keyboard = []
+    for i, opt in enumerate(options):
+        keyboard.append(
+            [InlineKeyboardButton(opt, callback_data=f"answer|{q_id}|{i}")]
+        )
 
     if images:
         media = []
@@ -282,10 +283,18 @@ async def answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    _, q_id, selected = query.data.split("|")
+    _, q_id, selected_index = query.data.split("|")
+    selected_index = int(selected_index)
 
-    cursor.execute("SELECT answer FROM questions WHERE id=?", (q_id,))
-    correct = cursor.fetchone()[0]
+    cursor.execute(
+        "SELECT answer, options FROM questions WHERE id=?",
+        (q_id,)
+    )
+    answer, options = cursor.fetchone()
+    options = options.split(",")
+
+    selected = options[selected_index]
+    correct = answer
 
     if selected == correct:
         text = "✅ Верно!"
