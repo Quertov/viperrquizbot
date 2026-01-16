@@ -12,7 +12,7 @@ from telegram.ext import (
 )
 
 # ================= НАСТРОЙКИ =================
-TOKEN = "8540104984:AAG5aOlc1JUuKuGea-5yath0svxPWYW6h6s"
+TOKEN = "8420858235:AAE2l1aywApRg1ndQIA7TmdT-pNzyygnXfo"
 CHANNELS = ["@vipe2rk"]
 ADMIN_IDS = [947059513, 1474840147]
 QUESTION_TIME = 10      # секунд на вопрос
@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER,
     quiz_id INTEGER,
     score INTEGER DEFAULT 0,
+    attempts INTEGER DEFAULT 1,
     PRIMARY KEY (user_id, quiz_id)
 )
 """)
@@ -94,22 +95,23 @@ async def quiz_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     quiz_id = int(query.data.split("|")[1])
-        # запрет повторного прохождения квиза (кроме админов)
+    # запрет повторного прохождения квиза (кроме админов)
     if query.from_user.id not in ADMIN_IDS:
         cursor.execute(
-            "SELECT 1 FROM users WHERE user_id=? AND quiz_id=?",
+            "SELECT attempts FROM users WHERE user_id=? AND quiz_id=?",
             (query.from_user.id, quiz_id)
         )
-        if cursor.fetchone():
+        row = cursor.fetchone()
+        if row and row[0] <= 0:
             await query.message.reply_text(
-                "❌ Вы уже проходили этот тест"
+                "❌ У вас закончились попытки для этого квиза"
             )
             return
     context.user_data["quiz_id"] = quiz_id
     context.user_data["index"] = 0
 
     cursor.execute(
-        "INSERT OR IGNORE INTO users (user_id, quiz_id, score) VALUES (?, ?, 0)",
+        "INSERT OR IGNORE INTO users (user_id, quiz_id, score, attempts) VALUES (?, ?, 0, 1)",
         (query.from_user.id, quiz_id)
     )
     conn.commit()
@@ -135,6 +137,13 @@ async def send_question(query, context):
     row = cursor.fetchone()
 
     if not row:
+        # уменьшить attempts после завершения квиза (кроме админов)
+        if query.from_user.id not in ADMIN_IDS:
+            cursor.execute(
+                "UPDATE users SET attempts = attempts - 1 WHERE user_id=? AND quiz_id=?",
+                (query.from_user.id, quiz_id)
+            )
+            conn.commit()
         cursor.execute(
             "SELECT score FROM users WHERE user_id=? AND quiz_id=?",
             (query.from_user.id, context.user_data["quiz_id"])
@@ -147,6 +156,7 @@ async def send_question(query, context):
             f"Ваш результат: {score} баллов"
         )
         return
+# ================= ЗАПУСК =================
 
     q_id, question, answer, options, image = row
     options = [o.strip() for o in options.split(",")]
@@ -331,13 +341,29 @@ async def answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ================= ЛИДЕРБОРД =================
 
 async def show_leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    cursor.execute(
-        "SELECT user_id, SUM(score) as total_score "
-        "FROM users "
-        "GROUP BY user_id "
-        "ORDER BY total_score DESC "
-        "LIMIT 10"
-    )
+    placeholders = ",".join("?" for _ in ADMIN_IDS)
+    if ADMIN_IDS:
+        cursor.execute(
+            f"""
+            SELECT user_id, SUM(score) as total_score
+            FROM users
+            WHERE user_id NOT IN ({placeholders})
+            GROUP BY user_id
+            ORDER BY total_score DESC
+            LIMIT 100
+            """,
+            ADMIN_IDS
+        )
+    else:
+        cursor.execute(
+            """
+            SELECT user_id, SUM(score) as total_score
+            FROM users
+            GROUP BY user_id
+            ORDER BY total_score DESC
+            LIMIT 100
+            """
+        )
     rows = cursor.fetchall()
 
     if not rows:
@@ -719,7 +745,48 @@ async def admin_add_question_photo(update: Update, context: ContextTypes.DEFAULT
 
 # ================= ЗАПУСК =================
 
+# ================== АДМИН-КОМАНДА ДОБАВЛЕНИЯ ПОПЫТОК ==================
+async def admin_add_attempt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS:
+        return
+
+    if len(context.args) != 3:
+        await update.message.reply_text(
+            "❌ Используй:\n/add_attempt USER_ID QUIZ_ID КОЛИЧЕСТВО"
+        )
+        return
+
+    try:
+        user_id = int(context.args[0])
+        quiz_id = int(context.args[1])
+        count = int(context.args[2])
+    except ValueError:
+        await update.message.reply_text("❌ Все аргументы должны быть числами")
+        return
+
+    cursor.execute(
+        "INSERT OR IGNORE INTO users (user_id, quiz_id, score, attempts) VALUES (?, ?, 0, 0)",
+        (user_id, quiz_id)
+    )
+
+    cursor.execute(
+        "UPDATE users SET attempts = attempts + ? WHERE user_id=? AND quiz_id=?",
+        (count, user_id, quiz_id)
+    )
+    conn.commit()
+
+    await update.message.reply_text(
+        f"✅ Пользователю {user_id} выдано {count} попыток для квиза {quiz_id}"
+    )
+
 # Включаем JobQueue для корректной работы таймеров
+
+# ================== КОМАНДА /id ==================
+async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        f"🆔 Ваш Telegram ID: {update.effective_user.id}"
+    )
+
 job_queue = JobQueue()
 
 app = (
@@ -741,6 +808,8 @@ app.add_handler(CommandHandler("add_channel", admin_add_channel))
 app.add_handler(CommandHandler("remove_channel", admin_remove_channel))
 app.add_handler(CommandHandler("remove_quiz", admin_remove_quiz))
 app.add_handler(CommandHandler("remove_question", admin_remove_question))
+app.add_handler(CommandHandler("add_attempt", admin_add_attempt))
+app.add_handler(CommandHandler("id", get_id))
 app.add_handler(
     MessageHandler(
         filters.PHOTO & filters.CaptionRegex(r"^/add_question"),
