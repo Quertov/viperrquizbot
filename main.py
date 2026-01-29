@@ -390,11 +390,22 @@ async def admin_add_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS:
         return
 
-    title = " ".join(context.args)
+    if not context.args:
+        await update.message.reply_text(
+            "❌ Укажи название квиза.\nПример:\n/add_quiz Мой первый квиз"
+        )
+        return
+
+    title = " ".join(context.args).strip()
+
+    if not title:
+        await update.message.reply_text("❌ Название квиза не может быть пустым")
+        return
+
     cursor.execute("INSERT INTO quizzes (title) VALUES (?)", (title,))
     conn.commit()
 
-    await update.message.reply_text("✅ Квиз добавлен")
+    await update.message.reply_text(f"✅ Квиз «{title}» добавлен")
 
 
 async def admin_add_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
